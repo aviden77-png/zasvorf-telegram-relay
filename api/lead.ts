@@ -192,6 +192,10 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
         status: telegramResponse.status,
         phone: maskPhone(phone),
       });
+      const tokenDigest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(botToken));
+      const tokenSha256 = Array.from(new Uint8Array(tokenDigest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
       res.status(502).json({
         ok: false,
         error: "telegram_failed",
@@ -199,8 +203,9 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
           tokenLen: botToken.length,
           tokenHead: botToken.slice(0, 6),
           tokenTail: botToken.slice(-4),
+          tokenSha256,
           chatIdLen: chatId.length,
-          chatIdHead: chatId.slice(0, 3),
+          chatIdFull: chatId,
         },
       });
       return;
