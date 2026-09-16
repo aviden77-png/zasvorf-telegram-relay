@@ -192,7 +192,17 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
         status: telegramResponse.status,
         phone: maskPhone(phone),
       });
-      res.status(502).json({ ok: false, error: "telegram_failed" });
+      res.status(502).json({
+        ok: false,
+        error: "telegram_failed",
+        debug: {
+          tokenLen: botToken.length,
+          tokenHead: botToken.slice(0, 6),
+          tokenTail: botToken.slice(-4),
+          chatIdLen: chatId.length,
+          chatIdHead: chatId.slice(0, 3),
+        },
+      });
       return;
     }
 
