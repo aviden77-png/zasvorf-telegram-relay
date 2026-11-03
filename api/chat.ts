@@ -27,6 +27,8 @@ const FORBIDDEN_BODY_KEYS = [
 interface ChatBody {
   message?: unknown;
   page?: unknown;
+  ref?: unknown;
+  dialogId?: unknown;
 }
 
 interface VercelRequestLike {
@@ -74,16 +76,23 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function formatMessage(input: { message: string; page: string }): string {
+const DIALOG_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function formatMessage(input: { message: string; page: string; dialogId: string }): string {
   const when = new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
-  return [
+  const lines = [
     "💬 <b>Сообщение из чата на сайте zasvorf.pro</b>",
     "",
     escapeHtml(input.message),
     "",
     `<b>Страница:</b> ${escapeHtml(input.page || "/")}`,
     `<b>Дата:</b> ${escapeHtml(when)}`,
-  ].join("\n");
+  ];
+  if (input.dialogId) {
+    lines.push(`Диалог: ${escapeHtml(input.dialogId)}`);
+  }
+  return lines.join("\n");
 }
 
 // Отдельный эндпоинт от api/lead.ts — сообщения чат-виджета не требуют
@@ -128,7 +137,8 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
     return;
   }
   const page = clip(payload.page, PAGE_MAX);
-  const text = formatMessage({ message, page });
+  const dialogId = DIALOG_ID_RE.test(clip(payload.dialogId, 80)) ? clip(payload.dialogId, 80) : "";
+  const text = formatMessage({ message, page, dialogId });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TELEGRAM_TIMEOUT_MS);
@@ -141,9 +151,9 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
       signal: controller.signal,
     });
 
-    let telegramJson: { ok?: unknown } = {};
+    let telegramJson: { ok?: unknown; result?: { message_id?: unknown } } = {};
     try {
-      telegramJson = (await telegramResponse.json()) as { ok?: unknown };
+      telegramJson = (await telegramResponse.json()) as { ok?: unknown; result?: { message_id?: unknown } };
     } catch {
       console.error("relay(chat): telegram_invalid_json", { status: telegramResponse.status });
       res.status(502).json({ ok: false, error: "telegram_failed" });
@@ -156,8 +166,12 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
       return;
     }
 
+    const telegramMessageId = telegramJson.result?.message_id;
     console.info("relay(chat): delivered", { status: 200, at: new Date().toISOString() });
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+      ok: true,
+      telegramMessageId: typeof telegramMessageId === "number" ? telegramMessageId : undefined,
+    });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "AbortError";
     console.error(timedOut ? "relay(chat): telegram_timeout" : "relay(chat): telegram_unreachable");
